@@ -317,6 +317,51 @@ impl WsFramedStream {
         Ok(ws)
     }
 
+    /// Open WSS with certificate verification and no insecure fallback or cached override.
+    pub async fn new_verified_wss(url: &str, ms_timeout: u64) -> ResultType<Self> {
+        if !url.starts_with("wss://") {
+            bail!("An authenticated WebSocket connection requires WSS");
+        }
+        let duration = Duration::from_millis(ms_timeout);
+        let request = url.into_client_request()?;
+        let (stream, addr) = timeout(duration, async {
+            let config = tokio::task::spawn_blocking(crate::verifier::client_config_safe).await??;
+            let connector = Some(Connector::Rustls(Arc::new(config)));
+            if let Some(proxy_conf) = Config::get_socks() {
+                let uri = request.uri();
+                let host = uri.host().ok_or_else(|| {
+                    Error::new(ErrorKind::InvalidInput, "Invalid WebSocket URL: no host")
+                })?;
+                let target = format!("{host}:{}", uri.port_u16().unwrap_or(443));
+                let stream = crate::tcp::FramedStream::connect(
+                    target.as_str(),
+                    None,
+                    &proxy_conf,
+                    ms_timeout,
+                )
+                .await?;
+                let addr = stream.1;
+                let (stream, _) =
+                    client_async_tls_with_config(request, stream.0.into_inner(), None, connector)
+                        .await?;
+                Ok::<_, anyhow::Error>((Either::Right(stream), addr))
+            } else {
+                let (stream, _) =
+                    connect_async_tls_with_config(request, None, false, connector).await?;
+                let addr = stream.get_ref().get_ref().local_addr()?;
+                Ok((Either::Left(stream), addr))
+            }
+        })
+        .await??;
+
+        Ok(Self {
+            stream,
+            addr,
+            encrypt: None,
+            send_timeout: ms_timeout,
+        })
+    }
+
     #[inline]
     pub fn set_raw(&mut self) {
         self.encrypt = None;
@@ -536,7 +581,7 @@ pub fn check_ws(endpoint: &str) -> String {
 /// Port of the reverse proxy serving `/ws/id` and `/ws/relay` on this client's own servers, for
 /// when it cannot listen on the scheme's default port. Any other host, such as a peer's server or
 /// a relay on another machine, keeps the default port. IP endpoints never get here.
-fn websocket_port(host: &str, relay_server: &str) -> Option<u16> {
+pub fn websocket_port(host: &str, relay_server: &str) -> Option<u16> {
     let port = Config::get_option(OPTION_WEBSOCKET_PORT);
     if port.is_empty() {
         return None;

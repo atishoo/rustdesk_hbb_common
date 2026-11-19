@@ -2321,6 +2321,43 @@ impl LocalConfig {
         .unwrap_or_default()
     }
 
+    pub fn get_options<const N: usize>(keys: [&str; N]) -> [String; N] {
+        let config = LOCAL_CONFIG.read().unwrap();
+        keys.map(|key| {
+            get_or(
+                &OVERWRITE_LOCAL_SETTINGS,
+                &config.options,
+                &DEFAULT_LOCAL_SETTINGS,
+                key,
+            )
+            .unwrap_or_default()
+        })
+    }
+
+    pub fn set_options<const N: usize>(options: [(&str, String); N]) {
+        let mut config = LOCAL_CONFIG.write().unwrap();
+        let mut changed = false;
+        for (key, mut value) in options {
+            if !is_option_can_save(&OVERWRITE_LOCAL_SETTINGS, key, &DEFAULT_LOCAL_SETTINGS, &value) {
+                changed |= config.options.remove(key).is_some();
+                continue;
+            }
+            if key == keys::OPTION_LANGUAGE && value == "default" {
+                value.clear();
+            } else if value.is_empty() {
+                changed |= config.options.remove(key).is_some();
+                continue;
+            }
+            if config.options.get(key) != Some(&value) {
+                config.options.insert(key.to_owned(), value);
+                changed = true;
+            }
+        }
+        if changed {
+            config.store();
+        }
+    }
+
     // Usually get_option should be used.
     pub fn get_option_from_file(k: &str) -> String {
         get_or(
