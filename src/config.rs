@@ -1849,6 +1849,18 @@ impl PeerConfig {
         NEW_STORED_PEER_CONFIG.lock().unwrap().insert(id.to_owned());
     }
 
+    pub fn forget_password(id: &str) -> crate::ResultType<()> {
+        let _lock = PEER_CONFIG_WRITE_LOCK.lock().unwrap();
+        let mut config: Self = try_load_path(Self::path(id))?;
+        if config.password.is_empty() {
+            return Ok(());
+        }
+        config.password.clear();
+        store_path(Self::path(id), config)?;
+        NEW_STORED_PEER_CONFIG.lock().unwrap().insert(id.to_owned());
+        Ok(())
+    }
+
     pub fn get_trusted_device_v2(id: &str) -> crate::ResultType<String> {
         let _lock = PEER_CONFIG_WRITE_LOCK.lock().unwrap();
         let config: Self = try_load_path(Self::path(id))?;
@@ -2788,16 +2800,6 @@ pub struct GroupUser {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub struct DeviceGroup {
-    #[serde(
-        default,
-        deserialize_with = "deserialize_string",
-        skip_serializing_if = "String::is_empty"
-    )]
-    pub name: String,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Group {
     #[serde(
         default,
@@ -2809,8 +2811,6 @@ pub struct Group {
     pub users: Vec<GroupUser>,
     #[serde(default, deserialize_with = "deserialize_vec_grouppeer")]
     pub peers: Vec<GroupPeer>,
-    #[serde(default, deserialize_with = "deserialize_vec_devicegroup")]
-    pub device_groups: Vec<DeviceGroup>,
 }
 
 impl Group {
@@ -2866,7 +2866,6 @@ deserialize_default!(deserialize_vec_abpeer, Vec<AbPeer>);
 deserialize_default!(deserialize_vec_abentry, Vec<AbEntry>);
 deserialize_default!(deserialize_vec_groupuser, Vec<GroupUser>);
 deserialize_default!(deserialize_vec_grouppeer, Vec<GroupPeer>);
-deserialize_default!(deserialize_vec_devicegroup, Vec<DeviceGroup>);
 deserialize_default!(deserialize_keypair, KeyPair);
 deserialize_default!(deserialize_size, Size);
 deserialize_default!(deserialize_hashmap_string_string, HashMap<String, String>);
